@@ -15,6 +15,20 @@ export function paneIdFromEnvironment(env) {
   return undefined;
 }
 
+export function workspaceIdFromEnvironment(env) {
+  if (env.HERDR_WORKSPACE_ID) return env.HERDR_WORKSPACE_ID;
+
+  if (env.HERDR_PLUGIN_CONTEXT_JSON) {
+    try {
+      return JSON.parse(env.HERDR_PLUGIN_CONTEXT_JSON).workspace_id;
+    } catch {
+      throw new Error("HERDR_PLUGIN_CONTEXT_JSON is not valid JSON");
+    }
+  }
+
+  return undefined;
+}
+
 export function createHerdrRunner(binary) {
   return (args) => {
     const result = spawnSync(binary, args, {
@@ -41,7 +55,32 @@ export function createHerdrRunner(binary) {
   };
 }
 
-export function breakPane({ env = process.env, runHerdr } = {}) {
+function isLoneWorkspacePane(run, env, layout) {
+  const workspaceId = layout.workspace_id || workspaceIdFromEnvironment(env);
+  const tabArgs = workspaceId
+    ? ["tab", "list", "--workspace", workspaceId]
+    : ["tab", "list"];
+  const tabResponse = run(tabArgs);
+  const tabs = tabResponse?.result?.tabs;
+
+  if (tabResponse?.result?.type !== "tab_list" || !Array.isArray(tabs)) {
+    throw new Error("tab.list returned an unexpected response");
+  }
+
+  const matchingTabs = workspaceId
+    ? tabs.filter((tab) => !tab.workspace_id || tab.workspace_id === workspaceId)
+    : tabs;
+
+  return matchingTabs.length <= 1;
+}
+
+export function breakPane({
+  env = process.env,
+  runHerdr,
+  toWorkspace = false,
+  to = "tab",
+} = {}) {
+  const targetWorkspace = toWorkspace || to === "workspace";
   const paneId = paneIdFromEnvironment(env);
   if (!paneId) {
     throw new Error("no focused Herdr pane is available in the plugin context");
@@ -55,7 +94,11 @@ export function breakPane({ env = process.env, runHerdr } = {}) {
     throw new Error("pane.layout returned an unexpected response");
   }
 
-  if (layout.panes.length <= 1) {
+  const isUntouched = targetWorkspace
+    ? layout.panes.length <= 1 && isLoneWorkspacePane(run, env, layout)
+    : layout.panes.length <= 1;
+
+  if (isUntouched) {
     return { changed: false, reason: "single_pane", pane_id: paneId };
   }
 
@@ -63,7 +106,8 @@ export function breakPane({ env = process.env, runHerdr } = {}) {
     run(["pane", "zoom", paneId, "--off"]);
   }
 
-  const moveResponse = run(["pane", "move", paneId, "--new-tab", "--focus"]);
+  const moveFlag = targetWorkspace ? "--new-workspace" : "--new-tab";
+  const moveResponse = run(["pane", "move", paneId, moveFlag, "--focus"]);
   const moveResult = moveResponse?.result?.move_result;
   if (!moveResult || typeof moveResult.changed !== "boolean") {
     throw new Error("pane.move returned an unexpected response");
@@ -76,8 +120,15 @@ export function breakPane({ env = process.env, runHerdr } = {}) {
   };
 }
 
+export function breakToWorkspace(options) {
+  return breakPane({ ...options, toWorkspace: true });
+}
+
 async function main() {
-  const result = breakPane();
+  const toWorkspace =
+    process.argv.includes("--workspace") ||
+    process.argv.includes("--new-workspace");
+  const result = breakPane({ toWorkspace });
   process.stdout.write(`${JSON.stringify(result)}\n`);
 }
 
