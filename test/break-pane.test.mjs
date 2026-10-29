@@ -3,17 +3,18 @@ import test from "node:test";
 
 import { breakPane, breakToWorkspace } from "../break-pane.mjs";
 
-const paneId = "w1:p2";
+const workspaceId = "w1";
+const paneId = `${workspaceId}:p2`;
 
-function layoutResponse({ paneCount, zoomed, workspaceId = "w1" } = {}) {
+function layoutResponse({ paneCount, zoomed, layoutWorkspaceId = workspaceId } = {}) {
   return {
     result: {
       type: "pane_layout",
       layout: {
         zoomed,
-        workspace_id: workspaceId || undefined,
+        workspace_id: layoutWorkspaceId || undefined,
         panes: Array.from({ length: paneCount }, (_, index) => ({
-          pane_id: `w1:p${index + 1}`,
+          pane_id: `${layoutWorkspaceId}:p${index + 1}`,
         })),
       },
     },
